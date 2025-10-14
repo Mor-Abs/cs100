@@ -1256,12 +1256,73 @@ def filter_stations_within_a_circle(stations_df, lat0, lon0, R_km):
     filtered_indices = gdf_proj.geometry.within(buffer)
     return stations_df[filtered_indices.values].reset_index(drop=True)
 
+def find_closest_station(stations_df, target_lon, target_lat):
+    """
+    Find the closest station using accurate distance in projected NZ coordinates.
 
-    # Create polygon from boundary
-    polygon = Polygon(boundary_coords)
+    Parameters:
+    - stations_df: DataFrame with 'long' and 'lat', the output of util.get_station_data
+    - target_lon: float, longitude of the point
+    - target_lat: float, latitude of the point
 
-    # Filter stations within the polygon
-    return gdf[gdf.geometry.within(polygon)]
+    Returns:
+    - pandas Series for the closest station
+    """
+    # 1. Convert station points to GeoDataFrame
+    gdf = gpd.GeoDataFrame(
+        stations_df.copy(),
+        geometry=gpd.points_from_xy(stations_df["long"], stations_df["lat"]),
+        crs="EPSG:4326"  # WGS84 (lat/lon)
+    )
+    
+    # 2. Project to NZ Transverse Mercator (for accurate distances in meters)
+    gdf = gdf.to_crs("EPSG:2193")
+
+    # 3. Create target point and project it
+    target_point = gpd.GeoSeries([Point(target_lon, target_lat)], crs="EPSG:4326").to_crs("EPSG:2193").iloc[0]
+
+    # 4. Compute distances and find closest
+    distances = gdf.geometry.distance(target_point)
+    closest_idx = distances.idxmin()
+    return gdf.loc[closest_idx], distances[closest_idx]
+
+def a_to_mw_leonard(a, rake, leonard_ds = 4.00, leonard_ss = 3.99):
+    # From qcore/qcore/uncertainities/mag_scaling.py
+    if round(rake % 360 / 90.0) % 2:
+        mw = np.log10(a) + leonard_ds
+    else:
+        mw = np.log10(a) + leonard_ss
+    return mw
+
+def a_to_mw_skarlatoudis(a):
+    # From qcore/qcore/uncertainities/mag_scaling.py
+    return np.log10(a) + 3.722
+
+
+def mw_sigma_leonard(rake):
+    """
+    sigma values are determined from the Leonard 2014 paper, based on Table 3 - S(a) passing it through the equation
+    also based on the this values can be obtained from the Table 5 of the Leonard 2010 and patthing the Sa values to 
+    the M0 to Mw conversion relation (eq.2.5) of Brendon's book. See my notes on Zotero.
+
+    rake: to determine if DS or SS
+    returns sigma value for mean Mw
+    """
+    # From qcore/qcore/uncertainities/mag_scaling.py
+    if round(rake % 360 / 90.0) % 2:
+        sigma = 0.3
+    else:
+        sigma = 0.26
+    return sigma
+
+
+
+def mw_sigma_skarlatoudis():
+    """
+    # 1.498 is the sigma value from Table 3 in Skarlatoudis 2016
+    """
+    # From qcore/qcore/uncertainities/mag_scaling.py
+    return np.log10(1.498)  
 
 
 # def get_distance_from_db(station: str, fault_name: str, hdf5_path: str) -> pd.DataFrame:
